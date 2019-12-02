@@ -1,0 +1,578 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+# Load Tidyverse, janitor and arcos, tidycensus, mapview, ggthemes, scales
+library(tidyverse)
+library(janitor)
+library(arcos)
+library(tidycensus)
+library(ggthemes)
+library(scales)
+library(sf)
+library(mapview)
+key <- "uO4EK6I"
+
+```
+
+```{r}
+###Q1
+
+#Full disclosure: this is code I used from an earlier lab
+
+#Task: Let's make a full list of buyers for a certain
+
+#1.
+moco_monthly_buyers_2012 <-combined_buyer_monthly(county="Montgomery", state="MD", year = 2012, key = key)
+#view(moco_monthly_buyers_2012)
+ 
+#we'd want to do this for every year, but I picked 2012 completely arbitrarily
+#now, this only tells us the DEA no, so we need a join. 
+
+
+#2.
+#let's actually make a new object to join
+moco_buyer_details <- buyer_details(county="Montgomery", state="MD", key = key)
+#view(moco_buyer_details)
+
+#still don't have the year, but at least this matches a name to the DEA no.
+
+#3.
+moco_buyers_2012_detailed <- moco_buyer_details %>%
+  left_join(moco_monthly_buyers_2012, by = "BUYER_DEA_NO")
+
+view(moco_buyers_2012_detailed)
+
+#im not gonna pay attention to the dosage column here, as its functionally useless
+
+
+
+```
+
+```{r}
+###Q2
+
+#Task: Can we make a full address list for that buyer variable we just made?
+
+#First off
+clean_names(moco_buyers_2012_detailed)
+
+#view(moco_buyers_2012_detailed)
+
+#ok now
+
+moco_2012_working <-moco_buyers_2012_detailed %>%
+  mutate(buyer_address_complete = paste0(BUYER_ADDRESS1," ", BUYER_ADDRESS2, " ",  BUYER_CITY, " ",  BUYER_ZIP))
+
+view(moco_2012_working)
+
+#cool! it seems to have worked.
+                                        
+```
+
+
+
+```{r}
+###Q3
+
+#first off, let's clean up this ugly dataset
+#moco_2012_working <- subset (moco_2012_working, select = c(BUYER_DEA_NO, BUYER_NAME, month, year, DOSAGE_UNIT, buyer_address_complete))
+
+#view(moco_2012_working)
+
+###wonderful! one last thing
+moco_2012_working <- clean_names(moco_2012_working)
+
+#ok! now time for the actual question: what were the biggest shipments in 2012? where did they go?
+
+moco_2012_working <- moco_2012_working %>%
+  mutate(pills_category = case_when(
+    dosage_unit > 10000 ~ "large shipment",
+    dosage_unit > 5000 ~ "medium shipment",
+    TRUE ~ "small shipment"))
+
+view(moco_2012_working)
+
+#the largest shipment? it went to a Rite Aid in Silver Spring in August of 2012.
+
+```
+
+```{r}
+###Q4
+
+#now, let's move to more general.
+#what were the annual pill totals per year in MoCo?
+moco_yearly_pills <- summarized_county_annual(county = "Montgomery", state = "MD", key = key)
+
+view(moco_yearly_pills)
+
+#peaks in 2010 and 2011, with a slight dip in 2012.
+```
+
+```{r}
+###Q5
+
+#what was the annual populaiton of MoCo at this time?
+
+moco_population <- county_population(county = "Montgomery", state = "MD", key = key)	
+
+view(moco_population)
+
+```
+
+```{r}
+###Q6
+
+#What were the pills per capita yearly?
+
+moco_population_working <- subset (moco_population, select = c(year, population))
+
+moco_per_capita <- inner_join(moco_population_working, moco_yearly_pills)
+
+#view(moco_per_capita)
+
+moco_per_capita_working <- moco_per_capita %>%
+  mutate(moco_annual = DOSAGE_UNIT/population)
+
+view(moco_per_capita_working)
+
+#interestingly enough, it seems the pills per capita increased yearly at the same rate the pills did.
+
+  
+
+```
+ 
+```{r}
+###Q7
+
+#let's get the GEOID for MoCo pharamacies!
+
+moco_geoid <- pharm_counties(county = "Montgomery", state = "MD", key = key)
+
+
+```
+ 
+```{r}
+###Q8
+
+#how about census tract data?
+
+moco_census_track <- pharm_tracts(county = "Montgomery", state = "MD", key = key)
+
+view(moco_census_track)
+
+
+```
+
+
+```{r}
+###Q9
+
+#let's graph out the yearly pills!
+
+ ggplot(moco_yearly_pills) +
+  geom_bar(stat="identity", aes(year, DOSAGE_UNIT), fill="plum") +
+  labs(x="Year", y="Total pills", title="In Montgomery County, opioids peak in 2010 and 2011", subtitle = "Total pills shipped to Montgomery County by year", caption = "Source: DEA ARCOS database, via Washington Post") +
+  scale_x_continuous(breaks = c(2006, 2007, 2008, 2009, 2010, 2011, 2012)) +
+  scale_y_continuous(labels = comma)
+
+
+```
+
+
+```{r}
+##Q10
+
+#let's graph out pills per capita!
+
+ ggplot(moco_per_capita_working) +
+  geom_bar(stat="identity", aes(year, moco_annual), fill="peru") +
+  labs(x="Year", y="Total pills per person", title="In Montgomery County, opioids per capita peak in 2010 and 2011", subtitle = "Total pills shipped to Montgomery County by year", caption = "Source: DEA ARCOS database, via Washington Post") +
+  scale_x_continuous(breaks = c(2006, 2007, 2008, 2009, 2010, 2011, 2012)) +
+  scale_y_continuous(labels = comma)
+
+
+
+```
+
+
+```{r}
+###Q11
+
+#how about moco's biggest cities?
+
+moco_cities_2012 <- moco_buyers_2012_detailed %>%
+  filter(BUYER_CITY %in% c("BETHESDA", "GAITHERSBURG", "KENSINGTON", "POTOMAC", "SILVER SPRING", "WHEATON")) %>%
+  select(BUYER_CITY, year, DOSAGE_UNIT)
+
+
+#i dont think we ever figured out how to do a pie chart, so im gonna use that bar chart code
+
+ggplot(moco_cities_2012) +
+  geom_bar(stat="identity", aes(year, DOSAGE_UNIT, fill=BUYER_CITY)) +
+  labs(x="Year", y="Total pills", title="Silver Spring saw the largest share of Mongtomery County's opioid shipments in 2012", subtitle = "Total pills per year shipped to Bethesda, Gaithersburg, Kensington,\nPotomac, Silver Spring and Wheaton", caption = "Source: DEA ARCOS database, via Washington Post") +
+  scale_x_continuous(breaks = c(2012)) +
+  scale_y_continuous(labels = comma)
+
+```
+
+
+```{r}
+##Q12
+
+#what were the most prolific pharmacies in MoCo?
+moco_total_pharm <- total_pharmacies_county(county="Montgomery", state="MD", key = key)
+
+view(moco_total_pharm)
+
+#ambulatory care pharmacy in Rockville, MD!
+```
+
+
+```{r}
+###Q13
+
+#what were the top distributors to MoCo?
+moco_total_distrib <-total_distributors_county(county="Montgomery", state="MD", key = key)
+
+view(moco_total_distrib)
+
+#cardinal, mckesson, and cvs, in that order.
+```
+
+
+
+```{r}
+###Q14
+
+
+#let's make a scatterplot
+view(moco_buyers_2012_detailed)
+
+ggplot(moco_buyers_2012_detailed) +
+  geom_point(aes(BUYER_CITY, DOSAGE_UNIT))
+
+
+```
+
+
+```{r}
+###Q15
+
+
+#view(moco_buyers_2012_detailed)
+
+#let's make a more detailed scatterplot of cities by opioid shipments in 2012
+
+
+
+ggplot(moco_buyers_2012_detailed) +
+  geom_point(aes(BUYER_CITY, DOSAGE_UNIT)) +
+  labs(x="2012 Population", y="Total pills in 2012", title="Baltimore County, Baltimore City, Anne Arundel County \nhad high number of opioids relative to population in 2012", caption = "Source: DEA ARCOS database, via Washington Post", fill="buyer_county") +
+  scale_y_continuous(labels = comma) +
+  scale_x_continuous(labels = comma) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+```
+
+```{r}
+#Q16
+
+#ok, now let's bring in tidycensus
+#what does the tract data for Montgomery County look like?
+
+census_api_key("549950d36c22ff16455fe196bbbd01d63cfbe6cf")
+
+
+moco_tract_geodata <- get_acs(geography = "tract", state="MD", county="Montgomery",
+              variables = "B01001_001", geometry = TRUE)
+
+# If you need to look up variables, this is how you do it
+acs_variables <- load_variables(2017, "acs5" )
+
+#view(moco_tract_geodata)
+
+#now that we have that, we want to join it to some things — both income and ARCOS
+
+
+```
+
+
+```{r}
+#Q17
+#I want to try pulling median household income data for 2010 using tidycensus, and then joining it to the tract/ARCOS geodata
+
+moco_tract_income <- get_acs(geography = "tract", state="MD", county="Montgomery",
+              variables = "B19019_001", geometry = TRUE)
+
+moco_tract <- pharm_tracts(county = "Montgomery", state = "MD", key = key)
+
+moco_annual_buyer <- combined_buyer_annual(county = "Montgomery", state = "MD", key = key)
+
+moco_tract_data_working <- inner_join(moco_annual_buyer, moco_tract, by="BUYER_DEA_NO")
+
+moco_tract_data_working <- inner_join(moco_tract_data_working, moco_tract_income, by = "GEOID")
+```
+
+```{r}
+#Q18
+#this dataset is really unwieldy, so let's condense it.
+
+moco_tract_data_working <-  subset (moco_tract_data_working, select = c(BUYER_DEA_NO, year, DOSAGE_UNIT, GEOID, TRACTCE))
+
+
+view(moco_tract_data_working)
+
+#i want to try two approaches to making my maps — one that shows the average of the pills shipped to the area over the history of the ARCOS database (2006-2012), and one that does so based on just the raw year-by-year totals
+```
+
+
+
+
+```{r}
+#Q19
+
+#Let's make the first of the aformentioned year-by-year maps — for 2006
+
+moco_tract_data_working_2006 <- filter(moco_tract_data_working, year == 2006)
+
+#actually, while we're here, let's just do it for every year — I'll map them out later
+
+moco_tract_data_working_2007 <- filter(moco_tract_data_working, year == 2007)
+moco_tract_data_working_2008 <- filter(moco_tract_data_working, year == 2008)
+moco_tract_data_working_2009 <- filter(moco_tract_data_working, year == 2009)
+moco_tract_data_working_2010 <- filter(moco_tract_data_working, year == 2010)
+moco_tract_data_working_2011 <- filter(moco_tract_data_working, year == 2011)
+moco_tract_data_working_2012 <- filter(moco_tract_data_working, year == 2012)
+
+#now it's time for the first of them maps
+
+
+
+```
+
+
+```{r}
+#Q20
+#the next few questions will be me testing the correlation between individual pill shipments and estimated income, starting with....2006!
+
+
+cor.test(moco_tract_data_working_2006$DOSAGE_UNIT, moco_tract_data_working_2006$estimate, method = "pearson")
+
+#as the p value was above 0.05, we fail to reject the null hypothesis for this year.
+```
+
+
+```{r}
+
+
+#Q21
+
+#2007
+cor.test(moco_tract_data_working_2007$DOSAGE_UNIT, moco_tract_data_working_2007$estimate, method = "pearson")
+
+#as the p value was above 0.05, we fail to reject the null hypothesis for this year.
+
+```
+
+```{r}
+#Q22
+
+#2008
+cor.test(moco_tract_data_working_2008$DOSAGE_UNIT, moco_tract_data_working_2008$estimate, method = "pearson")
+
+#as the p value was above 0.05, we fail to reject the null hypothesis for this year.
+```
+
+
+```{r}
+#Q23
+
+#2009
+cor.test(moco_tract_data_working_2009$DOSAGE_UNIT, moco_tract_data_working_2009$estimate, method = "pearson")
+
+#as the p value was above 0.05, we fail to reject the null hypothesis for this year.
+```
+
+```{r}
+
+#Q24
+
+#2010
+cor.test(moco_tract_data_working_2010$DOSAGE_UNIT, moco_tract_data_working_2010$estimate, method = "pearson")
+
+#as the p value was above 0.05, we fail to reject the null hypothesis for this year.
+
+```
+
+
+```{r}
+#Q25
+
+#2011
+cor.test(moco_tract_data_working_2011$DOSAGE_UNIT, moco_tract_data_working_2011$estimate, method = "pearson")
+
+#as the p value was above 0.05, we fail to reject the null hypothesis for this year.
+```
+
+
+
+```{r}
+#Q26
+
+#2012
+
+cor.test(moco_tract_data_working_2012$DOSAGE_UNIT, moco_tract_data_working_2012$estimate, method = "pearson")
+
+#as the p value was above 0.05, we fail to reject the null hypothesis for this year.
+```
+
+
+```{r}
+
+#Q27
+
+#So, there doesn't appear to be a correlation between the individual pill shipments and income within Montgomery County — how does that compare to the state of Maryland as a whole?
+
+#as per usual, let's start with 2006
+
+
+md_tract_income <- get_acs(geography = "county", state="MD",
+              variables = "B19019_001", geometry = TRUE) %>%
+rename(countyfips = GEOID)
+  
+    
+
+md_annual_pills_2006 <- summarized_county_annual(state = "MD", key = key) 	%>%
+  filter(year == 2006)
+
+md_pills_income_2006 <- left_join(md_annual_pills_2006, md_tract_income, by = "countyfips")
+
+
+```
+
+
+
+```{r}
+#Q28
+
+#R freaked out when I tried making the 2006 correlation test part of the prior chunk, so this will be its own chunk (as will be the following correlation tests)
+
+cor.test(md_pills_income_2006$DOSAGE_UNIT, md_pills_income_2006$estimate, method = "pearson")
+
+#as the p value is greater than 0.05, we fail to reject the null hypothesis.
+
+```
+
+
+```{r}
+
+
+#Q29
+
+
+md_annual_pills_2007 <- summarized_county_annual(state = "MD", key = key) 	%>%
+  filter(year == 2007)
+
+md_pills_income_2007 <- left_join(md_annual_pills_2007, md_tract_income, by = "countyfips")
+
+cor.test(md_pills_income_2007$DOSAGE_UNIT, md_pills_income_2007$estimate, method = "pearson")
+
+#as the p value is greater than 0.05, we fail to reject the null hypothesis.
+
+
+
+
+```
+
+```{r}
+
+#Q30
+
+
+md_annual_pills_2008 <- summarized_county_annual(state = "MD", key = key) 	%>%
+  filter(year == 2008)
+
+md_pills_income_2008 <- left_join(md_annual_pills_2008, md_tract_income, by = "countyfips")
+
+cor.test(md_pills_income_2008$DOSAGE_UNIT, md_pills_income_2008$estimate, method = "pearson")
+
+#as the p value is greater than 0.05, we fail to reject the null hypothesis.
+
+```
+
+
+```{r}
+
+#Q31
+
+
+md_annual_pills_2009 <- summarized_county_annual(state = "MD", key = key) 	%>%
+  filter(year == 2009)
+
+md_pills_income_2009 <- left_join(md_annual_pills_2009, md_tract_income, by = "countyfips")
+
+cor.test(md_pills_income_2009$DOSAGE_UNIT, md_pills_income_2009$estimate, method = "pearson")
+
+#as the p value is greater than 0.05, we fail to reject the null hypothesis.
+
+```
+
+
+```{r}
+
+#Q32
+
+
+md_annual_pills_2010 <- summarized_county_annual(state = "MD", key = key) 	%>%
+  filter(year == 2010)
+
+md_pills_income_2010 <- left_join(md_annual_pills_2010, md_tract_income, by = "countyfips")
+
+cor.test(md_pills_income_2010$DOSAGE_UNIT, md_pills_income_2010$estimate, method = "pearson")
+
+#as the p value is greater than 0.05, we fail to reject the null hypothesis.
+
+```
+
+
+
+```{r}
+
+#Q33
+
+md_annual_pills_2011 <- summarized_county_annual(state = "MD", key = key) 	%>%
+  filter(year == 2011)
+
+md_pills_income_2011 <- left_join(md_annual_pills_2011, md_tract_income, by = "countyfips")
+
+cor.test(md_pills_income_2011$DOSAGE_UNIT, md_pills_income_2011$estimate, method = "pearson")
+
+#as the p value is greater than 0.05, we fail to reject the null hypothesis.
+
+```
+
+```{r}
+
+#Q34
+
+
+md_annual_pills_2012 <- summarized_county_annual(state = "MD", key = key) 	%>%
+  filter(year == 2012)
+
+md_pills_income_2012 <- left_join(md_annual_pills_2012, md_tract_income, by = "countyfips")
+
+cor.test(md_pills_income_2012$DOSAGE_UNIT, md_pills_income_2012$estimate, method = "pearson")
+
+#as the p value is greater than 0.05, we fail to reject the null hypothesis.
+
+```
+
+
